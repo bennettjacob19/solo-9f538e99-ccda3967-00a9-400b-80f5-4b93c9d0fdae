@@ -1,0 +1,10 @@
+{
+  "group": "com.example",
+  "name": "reports-tool",
+  "version": "0.7.3",
+  "packaging": "zip",
+  "sha256": "5d1f3b7a9c2e4d6f8a0b1c3d5e7f9a2b4c6d8e0f1a3b5c7d9e2f4a6b8c0d1e3f",
+  "size_bytes": 8912345,
+  "license": "BSD-3-Clause",
+  "dependencies": ["com.example:shared-lib:1.9.0"]
+}

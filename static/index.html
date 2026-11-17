@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>制品元数据熔断网关</title>
+<style>
+  :root {
+    --bg: #0e1220;
+    --panel: #171d31;
+    --panel2: #1f2740;
+    --border: #2c3757;
+    --text: #e6eaf5;
+    --muted: #8c98b8;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --blue: #60a5fa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    padding: 20px 28px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 19px; margin: 0; letter-spacing: .2px; }
+  header .sub { color: var(--muted); font-size: 12.5px; }
+  main { padding: 20px 28px 60px; display: grid; gap: 18px; max-width: 1400px; margin: 0 auto; }
+  .grid2 { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 18px; }
+  @media (max-width: 950px) { .grid2 { grid-template-columns: 1fr; } }
+  section {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px;
+  }
+  section h2 { font-size: 14px; margin: 0 0 12px; color: var(--text); font-weight: 600; }
+  section h2 small { color: var(--muted); font-weight: 400; margin-left: 8px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  input[type=text], input[type=number], select {
+    background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: 8px 10px; font: inherit; width: 100%;
+  }
+  button {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 14px; font: inherit; cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  button:hover { background: #2a3456; border-color: #3b4a75; }
+  button.primary { background: #1d4ed8; border-color: #2563eb; }
+  button.primary:hover { background: #2563eb; }
+  button.danger { border-color: #7f1d1d; color: #fca5a5; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .row { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
+  .row > div { flex: 1 1 160px; min-width: 0; }
+  .row > button { flex: 0 0 auto; }
+  .quick { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .quick button { padding: 4px 10px; font-size: 12px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px;
+    font-size: 11.5px; border: 1px solid transparent; font-variant-numeric: tabular-nums;
+  }
+  .pill.closed { background: rgba(52,211,153,.12); color: var(--green); border-color: rgba(52,211,153,.35); }
+  .pill.open { background: rgba(248,113,113,.12); color: var(--red); border-color: rgba(248,113,113,.35); }
+  .pill.half_open { background: rgba(251,191,36,.12); color: var(--amber); border-color: rgba(251,191,36,.4); }
+  .pill.normal { background: rgba(96,165,250,.12); color: var(--blue); border-color: rgba(96,165,250,.35); }
+  .pill.gray { background: #222a42; color: var(--muted); border-color: var(--border); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; }
+  tr:last-child td { border-bottom: none; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .empty { color: var(--muted); padding: 14px 4px; font-size: 13px; }
+  .log { max-height: 260px; overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .log .line { padding: 3px 0; border-bottom: 1px dashed #232d49; color: var(--muted); }
+  .log .line b { color: var(--text); font-weight: 500; }
+  .log .kind-opened, .log .kind-probe_failed { color: var(--red); }
+  .log .kind-probe_success, .log .kind-reset { color: var(--green); }
+  .log .kind-stale_success_ignored, .log .kind-probe_stale, .log .kind-probe_abandoned { color: var(--amber); }
+  #results { display: grid; gap: 8px; max-height: 360px; overflow-y: auto; margin-top: 12px; }
+  .res {
+    display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center;
+    background: var(--panel2); border: 1px solid var(--border); border-radius: 9px; padding: 8px 12px;
+  }
+  .res .who { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); }
+  .res .meta { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+  .res.ok { border-left: 3px solid var(--green); }
+  .res.rejected { border-left: 3px solid var(--amber); }
+  .res.fail { border-left: 3px solid var(--red); }
+  pre { margin: 6px 0 0; background: #0b0f1c; border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; overflow: auto; font-size: 11.5px; max-height: 240px; color: #b9c6e6; }
+  .statgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+  .stat { background: var(--panel2); border: 1px solid var(--border); border-radius: 9px; padding: 10px 12px; }
+  .stat .v { font-size: 21px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .stat .k { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .switch { display: flex; gap: 8px; flex-wrap: wrap; }
+  .switch button.active { border-color: var(--blue); color: var(--blue); background: rgba(96,165,250,.1); }
+  #banner {
+    display: none; padding: 10px 14px; border-radius: 9px; font-size: 13px;
+    border: 1px solid rgba(251,191,36,.4); background: rgba(251,191,36,.1); color: var(--amber);
+  }
+  #banner.show { display: block; }
+  a { color: var(--blue); }
+</style>
+</head>
+<body>
+<header>
+  <h1>制品元数据熔断网关</h1>
+  <span class="sub">FastAPI · 双 worker · SQLite 共享熔断状态 · 按制品名转发本地目录服务</span>
+</header>
+
+<main>
+  <div id="banner"></div>
+
+  <div class="grid2">
+    <section>
+      <h2>查询元数据 <small>并发请求；慢查询不会阻塞其他查询</small></h2>
+      <div class="row">
+        <div style="flex:2 1 240px">
+          <label for="artifact">制品名（可逗号分隔批量）</label>
+          <input id="artifact" type="text" value="example-app.json" autocomplete="off" />
+        </div>
+        <div>
+          <label for="count">并发请求数</label>
+          <input id="count" type="number" min="1" max="50" value="1" />
+        </div>
+        <button class="primary" id="queryBtn">查询</button>
+      </div>
+      <div class="quick">
+        <button data-art="example-app.json">example-app.json</button>
+        <button data-art="shared-lib.json">shared-lib.json</button>
+        <button data-art="reports-tool.json">reports-tool.json</button>
+        <button data-art="missing-artifact.json">不存在的制品</button>
+      </div>
+      <div class="hint">每次点击“查询”会发出「并发请求数」个请求；响应会标注由哪个 worker 处理、耗时与熔断作用。</div>
+      <div id="results"></div>
+    </section>
+
+    <section>
+      <h2>示例上游控制 <small>所有 gateway worker 共用同一上游</small></h2>
+      <div class="switch" id="modeSwitch">
+        <button data-mode="normal">正常 200</button>
+        <button data-mode="delay">延迟响应</button>
+        <button data-mode="503">返回 503</button>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <div>
+          <label for="delay">延迟秒数（延迟模式 / 也可配合正常模式保存）</label>
+          <input id="delay" type="number" min="0" max="60" step="0.1" value="3.0" />
+        </div>
+        <button id="applyModeBtn">应用</button>
+      </div>
+      <div class="hint" id="modeHint">当前模式：读取中…</div>
+
+      <h2 style="margin-top:20px">上游实际访问次数 <small>熔断拒绝的请求不应增加</small></h2>
+      <div class="statgrid">
+        <div class="stat"><div class="v" id="upStreamHits">–</div><div class="k">上游收到的 /artifacts 请求</div></div>
+        <div class="stat"><div class="v" id="gwHits">–</div><div class="k">网关转发次数</div></div>
+        <div class="stat"><div class="v" id="probeHits">–</div><div class="k">其中恢复探测</div></div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button id="refreshStatsBtn">刷新</button>
+        <button id="resetUpstreamBtn">清零上游计数</button>
+        <button class="danger" id="resetAllBtn">重置熔断状态</button>
+      </div>
+      <div class="hint">提示：将模式切到“返回 503”，连点三次查询即可看到熔断；2 秒后再查询会放行一次探测。</div>
+    </section>
+  </div>
+
+  <section>
+    <h2>熔断状态 <small>每 2 秒自动刷新；状态保存在 SQLite，重启后保留</small></h2>
+    <table>
+      <thead>
+        <tr>
+          <th>制品</th><th>状态</th><th class="num">连续失败</th><th class="num">冷却剩余</th>
+          <th class="num">探测代次</th><th class="num">纪元</th><th>最近错误</th>
+        </tr>
+      </thead>
+      <tbody id="breakerBody"></tbody>
+    </table>
+    <div class="empty" id="breakerEmpty" style="display:none">还没有查询记录。</div>
+  </section>
+
+  <section>
+    <h2>事件日志 <small>按完成顺序记录熔断判定</small></h2>
+    <div class="log" id="eventLog"></div>
+  </section>
+</main>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+const state = { mode: "normal", refreshTimer: null, inflight: 0 };
+
+function pill(text, cls) { return `<span class="pill ${cls}">${text}</span>`; }
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function fmt(n) { return (n === undefined || n === null) ? "–" : Number(n).toLocaleString("zh-CN"); }
+
+function banner(msg, kind = "warn") {
+  const el = $("#banner");
+  if (!msg) { el.className = ""; el.style.display = "none"; return; }
+  el.textContent = msg;
+  el.style.display = "block";
+  el.className = "show";
+}
+
+async function jget(url, opts) {
+  const r = await fetch(url, opts);
+  let body;
+  try { body = await r.json(); } catch { body = { raw: await r.text() }; }
+  return { status: r.status, ok: r.ok, body };
+}
+
+// ---------------------------------------------------------------- queries
+async function runQuery() {
+  const raw = $("#artifact").value.trim();
+  const names = raw.split(",").map(s => s.trim()).filter(Boolean);
+  const count = Math.max(1, Math.min(50, parseInt($("#count").value || "1", 10)));
+  if (!names.length) { banner("请输入至少一个制品名"); return; }
+
+  const jobs = [];
+  for (let i = 0; i < count; i++) jobs.push(names[i % names.length]);
+  $("#queryBtn").disabled = true;
+  $("#results").innerHTML = "";
+  const started = performance.now();
+
+  const promises = jobs.map(async (name, idx) => {
+    const t0 = performance.now();
+    let res;
+    try {
+      res = await jget(`/api/meta/${encodeURIComponent(name)}`);
+    } catch (e) {
+      res = { status: 0, ok: false, body: { error: String(e) } };
+    }
+    const dt = Math.round(performance.now() - t0);
+    renderResult(idx, name, res, dt);
+    return { name, status: res.status, body: res.body, dt };
+  });
+  const all = await Promise.all(promises);
+  const wall = Math.round(performance.now() - started);
+  $("#queryBtn").disabled = false;
+
+  const rejected = all.filter(x => x.status === 503).length;
+  const failed = all.filter(x => x.status >= 500 && x.status !== 503).length;
+  banner(`完成 ${all.length} 个查询（墙钟 ${wall}ms）：成功 ${all.length - rejected - failed}，熔断拒绝 ${rejected}，上游失败 ${failed}`,
+         rejected || failed ? "warn" : "ok");
+  refresh();
+}
+
+function renderResult(idx, name, res, dt) {
+  const b = res.body || {};
+  const rejected = res.status === 503 && b.error === "circuit_open";
+  const ok = res.status === 200;
+  const cls = ok ? "ok" : rejected ? "rejected" : "fail";
+  const label = ok ? pill("200 成功", "closed")
+    : rejected ? pill("503 熔断拒绝", "open")
+    : pill(`${res.status} 上游失败`, "half_open");
+  const role = b.role ? pill(b.role === "probe" ? "恢复探测" : "正常调用", b.role === "probe" ? "half_open" : "normal") : "";
+  const who = `#${idx + 1} ${esc(name)} · worker ${esc(b.pid ?? "–")} · ${dt}ms`;
+  const meta = ok
+    ? `${role} ${pill("breaker: " + (b.breaker_state || "closed"), b.breaker_state || "closed")} ${pill(b.breaker_effect || "", "gray")} · 版本 ${esc(b.metadata?.metadata?.version ?? "–")}`
+    : `${role} ${rejected ? `重试约 ${esc(b.retry_after ?? "?")}s 后 · 状态 ${esc(b.state || "open")}` : esc(b.detail || b.error || "")} ${b.breaker_effect ? pill(b.breaker_effect, "gray") : ""}`;
+  const detail = (ok || b.metadata)
+    ? `<pre>${esc(JSON.stringify(b.metadata ?? b, null, 2))}</pre>` : "";
+  const div = document.createElement("div");
+  div.className = `res ${cls}`;
+  div.innerHTML = `<div>${label} ${role}</div><div class="who">${who}</div><div class="meta">${meta}</div>${detail}`;
+  $("#results").prepend(div);
+}
+
+// ---------------------------------------------------------------- upstream control
+async function loadMode() {
+  const r = await jget("/api/upstream-mode");
+  if (r.ok) {
+    state.mode = r.body.mode;
+    $("#delay").value = r.body.delay ?? $("#delay").value;
+  }
+  renderMode();
+}
+
+function renderMode() {
+  document.querySelectorAll("#modeSwitch button").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.mode === state.mode);
+  });
+  const names = { normal: "正常 200", delay: "延迟响应", "503": "返回 503" };
+  $("#modeHint").textContent = `当前模式：${names[state.mode] || state.mode}` +
+    (state.mode === "delay" ? `（${$("#delay").value}s）` : "");
+}
+
+async function applyMode(mode) {
+  const delay = parseFloat($("#delay").value || "0");
+  const r = await jget("/api/upstream-mode", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ mode, delay }),
+  });
+  if (!r.ok) { banner("设置上游模式失败：" + (r.body.error || r.status)); return; }
+  state.mode = r.body.mode;
+  renderMode();
+  await refresh();
+}
+
+// ---------------------------------------------------------------- status
+async function refresh() {
+  if (state.inflight > 0) return;
+  state.inflight++;
+  try {
+    const r = await jget("/api/breakers");
+    if (!r.ok) return;
+    const data = r.body;
+    const rows = data.breakers || [];
+    $("#breakerEmpty").style.display = rows.length ? "none" : "block";
+    $("#breakerBody").innerHTML = rows.map(b => {
+      const cls = b.state === "half_open" ? "half_open" : b.state;
+      return `<tr>
+        <td>${esc(b.artifact)}</td>
+        <td>${pill(b.state, cls)}</td>
+        <td class="num">${b.failures} / ${data.threshold}</td>
+        <td class="num">${b.state === "open" ? b.cooldown_remaining.toFixed(2) + "s" : "–"}</td>
+        <td class="num">${b.probe_gen}</td>
+        <td class="num">${b.epoch}</td>
+        <td title="${esc(b.last_error || "")}">${esc((b.last_error || "").slice(0, 48))}</td>
+      </tr>`;
+    }).join("");
+
+    const byMode = data.gateway_upstream?.by_mode || {};
+    $("#gwHits").textContent = fmt(data.gateway_upstream?.hits ?? 0);
+    $("#probeHits").textContent = fmt(byMode.probe ?? 0);
+    const upstreamHits = await jget("/api/upstream-stats");
+    $("#upStreamHits").textContent = upstreamHits.ok ? fmt(upstreamHits.body.hits) : "不可达";
+
+    const events = (data.events || []).filter(e => e.kind !== "reset");
+    $("#eventLog").innerHTML = events.map(e => {
+      const t = new Date(e.ts * 1000).toLocaleTimeString("zh-CN", { hour12: false });
+      return `<div class="line"><b>${t}</b> ${pill(esc(e.kind), "gray")} ${esc(e.artifact)} ${esc(e.detail || "")}</div>`;
+    }).join("") || `<div class="empty">暂无事件</div>`;
+  } finally {
+    state.inflight--;
+  }
+}
+
+// ---------------------------------------------------------------- wiring
+$("#queryBtn").addEventListener("click", runQuery);
+$("#artifact").addEventListener("keydown", e => { if (e.key === "Enter") runQuery(); });
+document.querySelectorAll(".quick button").forEach(btn => btn.addEventListener("click", () => {
+  $("#artifact").value = btn.dataset.art; runQuery();
+}));
+document.querySelectorAll("#modeSwitch button").forEach(btn => btn.addEventListener("click", () => applyMode(btn.dataset.mode)));
+$("#applyModeBtn").addEventListener("click", () => applyMode(state.mode));
+$("#delay").addEventListener("change", () => { if (state.mode === "delay") applyMode("delay"); else renderMode(); });
+$("#refreshStatsBtn").addEventListener("click", refresh);
+$("#resetUpstreamBtn").addEventListener("click", async () => { await jget("/api/upstream-stats/reset", { method: "POST" }); await refresh(); });
+$("#resetAllBtn").addEventListener("click", async () => {
+  if (!confirm("重置所有熔断状态与计数？")) return;
+  await jget("/api/reset", { method: "POST" });
+  await jget("/api/upstream-stats/reset", { method: "POST" });
+  $("#results").innerHTML = ""; banner("已重置");
+  await refresh();
+});
+
+loadMode();
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

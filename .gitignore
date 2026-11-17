@@ -1,0 +1,9 @@
+# Local development artefacts (do not commit)
+.bootstrap/
+.deps/
+.devdata/
+.venv/
+data/
+__pycache__/
+*.pyc
+.pytest_cache/

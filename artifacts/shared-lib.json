@@ -1,0 +1,10 @@
+{
+  "group": "com.example",
+  "name": "shared-lib",
+  "version": "1.9.0",
+  "packaging": "jar",
+  "sha256": "3c9e7d2b44f1a6c8e0b57d9a1f2c4e6b8d0a1357924680acebdf1357924680ac",
+  "size_bytes": 524288,
+  "license": "MIT",
+  "dependencies": []
+}

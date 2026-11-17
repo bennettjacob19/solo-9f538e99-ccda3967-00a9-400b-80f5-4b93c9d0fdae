@@ -1,0 +1,60 @@
+services:
+  upstream:
+    build: .
+    image: artifact-breaker-gateway:local
+    command:
+      - python
+      - -m
+      - uvicorn
+      - upstream:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "9000"
+    environment:
+      ARTIFACT_DIR: /srv/artifacts
+    expose:
+      - "9000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:9000/healthz')"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+    restart: unless-stopped
+
+  gateway:
+    build: .
+    image: artifact-breaker-gateway:local
+    command:
+      - python
+      - -m
+      - uvicorn
+      - app:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --workers
+      - "2"
+    environment:
+      GATEWAY_DB: /data/breaker.db
+      UPSTREAM_URL: http://upstream:9000
+      REQUEST_TIMEOUT: "1.0"
+      COOLDOWN: "2.0"
+      FAILURE_THRESHOLD: "3"
+    ports:
+      - "8000:8000"
+    volumes:
+      - breaker-data:/data
+    depends_on:
+      upstream:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  breaker-data:

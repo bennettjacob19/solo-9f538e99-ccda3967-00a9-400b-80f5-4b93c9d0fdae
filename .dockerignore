@@ -1,0 +1,12 @@
+.git
+.gitignore
+.deps
+.bootstrap
+.devdata
+.venv
+data
+__pycache__
+*.pyc
+.pytest_cache
+tests
+README.md

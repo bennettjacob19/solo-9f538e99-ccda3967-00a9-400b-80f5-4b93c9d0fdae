@@ -1,0 +1,10 @@
+{
+  "group": "com.example",
+  "name": "example-app",
+  "version": "2.4.1",
+  "packaging": "jar",
+  "sha256": "9f2c7a1d1a4f0ed0f3b0a6a4f9d5e3c1b7a8901234567890abcdef1234567890",
+  "size_bytes": 1843200,
+  "license": "Apache-2.0",
+  "dependencies": ["com.example:core:1.9.0", "org.slf4j:slf4j-api:2.0.13"]
+}
