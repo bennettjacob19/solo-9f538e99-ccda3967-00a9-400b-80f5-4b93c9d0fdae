@@ -133,7 +133,7 @@
         <button data-art="reports-tool.json">reports-tool.json</button>
         <button data-art="missing-artifact.json">不存在的制品</button>
       </div>
-      <div class="hint">每次点击“查询”会发出「并发请求数」个请求；响应会标注由哪个 worker 处理、耗时与熔断作用。</div>
+      <div class="hint">每次点击“查询”会发出「并发请求数」个请求；同名请求在一次目录调用完成前到达会被合并为一次上游调用，响应会标注调用发起者 / 同进程合并 / 跨进程等待、所属 worker 与 call 代次。</div>
       <div id="results"></div>
     </section>
 
@@ -153,10 +153,11 @@
       </div>
       <div class="hint" id="modeHint">当前模式：读取中…</div>
 
-      <h2 style="margin-top:20px">上游实际访问次数 <small>熔断拒绝的请求不应增加</small></h2>
+      <h2 style="margin-top:20px">上游实际访问次数 <small>熔断拒绝与在途合并都不应增加上游访问</small></h2>
       <div class="statgrid">
         <div class="stat"><div class="v" id="upStreamHits">–</div><div class="k">上游收到的 /artifacts 请求</div></div>
-        <div class="stat"><div class="v" id="gwHits">–</div><div class="k">网关转发次数</div></div>
+        <div class="stat"><div class="v" id="gwHits">–</div><div class="k">网关实际转发次数</div></div>
+        <div class="stat"><div class="v" id="sharedJoins">–</div><div class="k">在途合并服务的请求</div></div>
         <div class="stat"><div class="v" id="probeHits">–</div><div class="k">其中恢复探测</div></div>
       </div>
       <div class="row" style="margin-top:12px">
@@ -242,7 +243,10 @@ async function runQuery() {
 
   const rejected = all.filter(x => x.status === 503).length;
   const failed = all.filter(x => x.status >= 500 && x.status !== 503).length;
-  banner(`完成 ${all.length} 个查询（墙钟 ${wall}ms）：成功 ${all.length - rejected - failed}，熔断拒绝 ${rejected}，上游失败 ${failed}`,
+  const leaders = all.filter(x => x.body && x.body.call_leader).length;
+  const joined = all.filter(x => x.body && x.body.call_gen !== undefined && !x.body.call_leader).length;
+  banner(`完成 ${all.length} 个查询（墙钟 ${wall}ms）：成功 ${all.length - rejected - failed}，熔断拒绝 ${rejected}，上游失败 ${failed}` +
+         (leaders || joined ? `；在途合并：${leaders} 次目录调用承载了 ${leaders + joined} 个请求` : ""),
          rejected || failed ? "warn" : "ok");
   refresh();
 }
@@ -256,15 +260,22 @@ function renderResult(idx, name, res, dt) {
     : rejected ? pill("503 熔断拒绝", "open")
     : pill(`${res.status} 上游失败`, "half_open");
   const role = b.role ? pill(b.role === "probe" ? "恢复探测" : "正常调用", b.role === "probe" ? "half_open" : "normal") : "";
+  // In-flight coalescing identity of this individual request.
+  let coalesce = "";
+  if (!rejected && b.call_gen !== undefined) {
+    if (b.call_leader) coalesce = pill(`调用发起者 #${b.call_gen}`, "normal");
+    else if (b.shared) coalesce = pill(`同进程合并 #${b.call_gen}`, "gray");
+    else coalesce = pill(`跨进程等待 #${b.call_gen}`, "gray");
+  }
   const who = `#${idx + 1} ${esc(name)} · worker ${esc(b.pid ?? "–")} · ${dt}ms`;
   const meta = ok
-    ? `${role} ${pill("breaker: " + (b.breaker_state || "closed"), b.breaker_state || "closed")} ${pill(b.breaker_effect || "", "gray")} · 版本 ${esc(b.metadata?.metadata?.version ?? "–")}`
-    : `${role} ${rejected ? `重试约 ${esc(b.retry_after ?? "?")}s 后 · 状态 ${esc(b.state || "open")}` : esc(b.detail || b.error || "")} ${b.breaker_effect ? pill(b.breaker_effect, "gray") : ""}`;
+    ? `${role} ${coalesce} ${pill("breaker: " + (b.breaker_state || "closed"), b.breaker_state || "closed")} ${pill(b.breaker_effect || "", "gray")} · 版本 ${esc(b.metadata?.metadata?.version ?? "–")}`
+    : `${role} ${coalesce} ${rejected ? `重试约 ${esc(b.retry_after ?? "?")}s 后 · 状态 ${esc(b.state || "open")}` : esc(b.detail || b.error || "")} ${b.breaker_effect ? pill(b.breaker_effect, "gray") : ""}`;
   const detail = (ok || b.metadata)
     ? `<pre>${esc(JSON.stringify(b.metadata ?? b, null, 2))}</pre>` : "";
   const div = document.createElement("div");
   div.className = `res ${cls}`;
-  div.innerHTML = `<div>${label} ${role}</div><div class="who">${who}</div><div class="meta">${meta}</div>${detail}`;
+  div.innerHTML = `<div>${label} ${role} ${coalesce}</div><div class="who">${who}</div><div class="meta">${meta}</div>${detail}`;
   $("#results").prepend(div);
 }
 
@@ -324,6 +335,7 @@ async function refresh() {
 
     const byMode = data.gateway_upstream?.by_mode || {};
     $("#gwHits").textContent = fmt(data.gateway_upstream?.hits ?? 0);
+    $("#sharedJoins").textContent = fmt(data.gateway_upstream?.shared_joins ?? 0);
     $("#probeHits").textContent = fmt(byMode.probe ?? 0);
     const upstreamHits = await jget("/api/upstream-stats");
     $("#upStreamHits").textContent = upstreamHits.ok ? fmt(upstreamHits.body.hits) : "不可达";

@@ -180,24 +180,26 @@ def test_probe_success_closes_circuit():
 
 
 def test_slow_success_started_before_trip_cannot_recover():
-    """The in-flight success must be ignored, the breaker stays open."""
-    script(
-        [
-            {"status": 200, "delay": 0.7},  # in flight when the trip happens
-            {"status": 503},
-            {"status": 503},
-            {"status": 503},
-        ]
-    )
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        slow = pool.submit(meta)
-        time.sleep(0.15)
-        fast = [meta() for _ in range(3)]
-        slow_resp = slow.result()
-    assert fast[-1].json()["breaker_effect"] == "opened"
-    assert slow_resp.status_code == 200
-    assert slow_resp.json()["breaker_effect"] == "stale_success_ignored"
-    assert breaker()["state"] == "open", "late pre-trip success must not close the breaker"
+    """In-flight coalescing keeps the pre-trip call's result fenced.
+
+    Under coalescing the same-name requests that used to create the trip now
+    join the slow call instead, so they cannot trip the breaker while it is in
+    flight.  The state-machine guarantee itself ("a slow success that belongs
+    to an older epoch cannot close an open breaker") is covered directly by
+    tests/test_unit.py::test_slow_pretrip_success_is_ignored.  Here we verify
+    the new, required behaviour: a slow 200 coalesces every concurrent
+    same-name request into a single upstream call and leaves the breaker
+    closed with no failures recorded.
+    """
+    script([{"status": 200, "delay": 0.7}])
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(lambda _: meta(), range(6)))
+    assert all(r.status_code == 200 for r in results)
+    assert upstream_hits() == 1, "concurrent same-name lookups must share one call"
+    b = breaker()
+    assert b["state"] == "closed" and b["failures"] == 0
+    leaders = [r.json().get("call_leader") for r in results]
+    assert leaders.count(True) == 1
 
 
 def test_slow_queries_do_not_block_each_other():
